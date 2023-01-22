@@ -259,6 +259,14 @@ func (sle StaticLabelEnforcer) ExtractLabel(next http.HandlerFunc) http.Handler 
 	})
 }
 
+type StaticLabelExistanceEnforcer string
+
+func (sle StaticLabelExistanceEnforcer) ExtractLabel(next http.HandlerFunc) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next(w, r.WithContext(context.WithValue(r.Context(), mustExist, true)))
+	})
+}
+
 func NewRoutes(upstream *url.URL, label string, extractLabeler ExtractLabeler, opts ...Option) (*routes, error) {
 	opt := options{}
 	for _, o := range opts {
@@ -375,6 +383,8 @@ type ctxKey int
 
 const keyLabel ctxKey = iota
 
+const mustExist ctxKey = iota
+
 // MustLabelValue returns a label (previously stored using WithLabelValue())
 // from the given context.
 // It will panic if no label is found or the value is empty.
@@ -389,8 +399,19 @@ func MustLabelValue(ctx context.Context) string {
 	return label
 }
 
+func MustExistLabel(ctx context.Context) bool {
+	label, ok := ctx.Value(mustExist).(bool)
+	if !ok {
+		// panic(fmt.Sprintf("can't find the %q value in the context", keyLabel))
+		return false
+	}
+
+	return label
+}
+
 // WithLabelValue stores a label in the given context.
 func WithLabelValue(ctx context.Context, label string) context.Context {
+	fmt.Printf("ctx WithLabelValue -- key:%v and label: %s \n", keyLabel, label)
 	return context.WithValue(ctx, keyLabel, label)
 }
 
@@ -399,12 +420,26 @@ func (r *routes) passthrough(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r *routes) query(w http.ResponseWriter, req *http.Request) {
-	e := NewEnforcer(r.errorOnReplace,
-		[]*labels.Matcher{{
-			Name:  r.label,
-			Type:  labels.MatchEqual,
-			Value: MustLabelValue(req.Context()),
-		}}...)
+	fmt.Printf("query r.label: %s \n", r.label)
+
+	var e *Enforcer
+	if MustExistLabel(req.Context()) {
+		fmt.Println("I was here")
+		e = NewEnforcer(r.errorOnReplace, true,
+			[]*labels.Matcher{{
+				Name:  r.label,
+				Type:  labels.MatchEqual,
+				Value: "",
+			}}...)
+	} else {
+		fmt.Println("I was there")
+		e = NewEnforcer(r.errorOnReplace, false,
+			[]*labels.Matcher{{
+				Name:  r.label,
+				Type:  labels.MatchEqual,
+				Value: MustLabelValue(req.Context()),
+			}}...)
+	}
 
 	// The `query` can come in the URL query string and/or the POST body.
 	// For this reason, we need to try to enforcing in both places.
@@ -515,6 +550,10 @@ func (r *routes) matcher(w http.ResponseWriter, req *http.Request) {
 }
 
 func injectMatcher(q url.Values, matcher *labels.Matcher) error {
+	if matcher == nil {
+		return nil
+	}
+
 	matchers := q[matchersParam]
 	if len(matchers) == 0 {
 		q.Set(matchersParam, matchersToString(matcher))

@@ -17,6 +17,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -45,6 +46,7 @@ func main() {
 		enableLabelAPIs        bool
 		unsafePassthroughPaths string // Comma-delimited string.
 		errorOnReplace         bool
+		mustExist              bool
 	)
 
 	flagset := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
@@ -62,6 +64,7 @@ func main() {
 		"This option is checked after Prometheus APIs, you cannot override enforced API endpoints to be not enforced with this option. Use carefully as it can easily cause a data leak if the provided path is an important "+
 		"API (like /api/v1/configuration) which isn't enforced by prom-label-proxy. NOTE: \"all\" matching paths like \"/\" or \"\" and regex are not allowed.")
 	flagset.BoolVar(&errorOnReplace, "error-on-replace", false, "When specified, the proxy will return HTTP status code 400 if the query already contains a label matcher that differs from the one the proxy would inject.")
+	flagset.BoolVar(&mustExist, "label-must-exist", false, "docs")
 
 	//nolint: errcheck // Parse() will exit on error.
 	flagset.Parse(os.Args[1:])
@@ -100,20 +103,50 @@ func main() {
 	if enableLabelAPIs {
 		opts = append(opts, injectproxy.WithEnabledLabelsAPI())
 	}
-	if len(unsafePassthroughPaths) > 0 {
-		opts = append(opts, injectproxy.WithPassthroughPaths(strings.Split(unsafePassthroughPaths, ",")))
+
+	passThroughPaths := []string{
+		"/api/v1/stores",
+		"/api/v1/status/flags",
+		"/graph",
+		"/status",
+		"/api/v1/status/buildinfo",
+		"/api/v1/status/runtimeinfo",
+		"/flags",
+		"/static/css/2.a92efa4c.chunk.css",
+		"/static/css/main.e1aaea6d.chunk.css",
+		"/static/js/2.2de83b5e.chunk.js",
+		"/static/js/main.a767bdbf.chunk.js",
+		"/manifest.json",
+		"/static/css/2.068d6373.chunk.css",
+		"/static/css/main.1e0a7b5f.chunk.css",
+		"/static/js/2.9d239a54.chunk.js",
+		"/static/js/main.5fdc5e81.chunk.js",
+		"/api/v1/label/__name__/values",
 	}
+
+	if len(unsafePassthroughPaths) > 0 {
+		passThroughPaths = append(strings.Split(unsafePassthroughPaths, ","), passThroughPaths...)
+
+	}
+
+	opts = append(opts, injectproxy.WithPassthroughPaths(passThroughPaths))
 	if errorOnReplace {
 		opts = append(opts, injectproxy.WithErrorOnReplace())
 	}
 
 	var extractLabeler injectproxy.ExtractLabeler
 	switch {
+	case mustExist:
+		fmt.Println("4")
+		extractLabeler = injectproxy.StaticLabelExistanceEnforcer("something")
 	case labelValue != "":
+		fmt.Println("1")
 		extractLabeler = injectproxy.StaticLabelEnforcer(labelValue)
 	case queryParam != "":
+		fmt.Println("2")
 		extractLabeler = injectproxy.HTTPFormEnforcer{ParameterName: queryParam}
 	case headerName != "":
+		fmt.Println("3")
 		extractLabeler = injectproxy.HTTPHeaderEnforcer{Name: http.CanonicalHeaderKey(headerName)}
 	}
 

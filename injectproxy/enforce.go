@@ -21,11 +21,13 @@ import (
 )
 
 type Enforcer struct {
+	requiredLabels map[string]bool
 	labelMatchers  map[string]*labels.Matcher
 	errorOnReplace bool
+	errorOnEmpty   bool
 }
 
-func NewEnforcer(errorOnReplace bool, ms ...*labels.Matcher) *Enforcer {
+func NewEnforcer(errorOnReplace bool, errorOnEmpty bool, ms ...*labels.Matcher) *Enforcer {
 	entries := make(map[string]*labels.Matcher)
 
 	for _, matcher := range ms {
@@ -132,6 +134,15 @@ func (ms Enforcer) EnforceNode(node parser.Node) error {
 
 	return nil
 }
+func contains(targets []*labels.Matcher, name string) bool {
+	for _, v := range targets {
+		if v.Name == name {
+			return v.Value != ""
+		}
+	}
+
+	return false
+}
 
 // EnforceMatchers appends the configured label matcher if not present.
 // If the label matcher that is to be injected is present (by labelname) but
@@ -141,21 +152,32 @@ func (ms Enforcer) EnforceNode(node parser.Node) error {
 func (ms Enforcer) EnforceMatchers(targets []*labels.Matcher) ([]*labels.Matcher, error) {
 	var res []*labels.Matcher
 
-	for _, target := range targets {
-		if matcher, ok := ms.labelMatchers[target.Name]; ok {
-			// matcher.String() returns something like "labelfoo=value"
-			if ms.errorOnReplace && matcher.String() != target.String() {
-				return res, newIllegalLabelMatcherError(matcher.String(), target.String())
-			}
-			continue
+	for name, _ := range ms.labelMatchers {
+		if !contains(targets, name) {
+			return nil, fmt.Errorf("Label %s must be supplied and not be empty", name)
 		}
+	}
+
+	for _, target := range targets {
+		// fmt.Printf("------> EnforceMatchers Target: %s\n", target.Name)
+		// if _, ok := ms.labelMatchers[target.Name]; ok {
+		// 	// 	// matcher.String() returns something like "labelfoo=value"
+		// 	// 	if ms.errorOnEmpty && target.Value == "" {
+		// 	// 		return nil, fmt.Errorf("Label %s must be supplied", target.Name)
+		// 	// 	}
+
+		// 	// 	if ms.errorOnReplace && matcher.String() != target.String() {
+		// 	// 		return res, newIllegalLabelMatcherError(matcher.String(), target.String())
+		// 	// 	}
+		// 	continue
+		// }
 
 		res = append(res, target)
 	}
 
-	for _, enforcedMatcher := range ms.labelMatchers {
-		res = append(res, enforcedMatcher)
-	}
+	// for _, enforcedMatcher := range ms.labelMatchers {
+	// 	res = append(res, enforcedMatcher)
+	// }
 
 	return res, nil
 }
